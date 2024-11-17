@@ -46,14 +46,36 @@ def to_bytes(data: any) -> bytes:
 		data.dtype.newbyteorder(ENDIANNESS)
 		return data.tobytes()
 
-def get_metadata(message: any, nonce: bool = True, chk: bool = True, ack: bool = True, start: bool = True):
-	'''Before the body of the message is sent, the following are communicated using this metadata:
-		- the message length
-		- the nonce of this message (used to ensure that this message is new and not rebroadcasted on the receiver end)
-		- the chk for this message
-		- a request for acknowledgement
-		- a message start sequence'''
-	pass
+def add_metadata(message: bytes, nonce: bool = True, chk: bool = True, ack: bool = True) -> bytearray:
+	'''
+	Take a message and adds the necessary metadata to it to complete the frame.
+
+	Args:
+		message (bytes): The message to send, converted to bytes
+		nonce (bool): Whether to include the time-based nonce or leave it empty
+		chk (bool): Whether to calculate the two-byte checksum or leave it empty
+		ack (bool): Whether to request an acknowledgement
+
+	Returns:
+		bytearray: The complete frame ready to send
+	'''
+	frame: bytearray = bytearray()
+	if not isinstance(message,bytes):
+		raise TypeError("Message should be a bytes object")
+	msg_len = len(message).to_bytes()
+	# Nonce calculation does not have to be the same across implementations, just needs to ensure that it is reasonably
+	# random. Below code takes the current Unix time down to 2 decimal places, then hashes it down to 1 byte using Blake2b
+	msg_nonce = blake2b("{:.2f}".format(time.time()).encode(),digest_size=1).digest() if nonce else (0).to_bytes()
+	msg_ack = (255).to_bytes() if ack else (0).to_bytes()
+	msg_start = (255).to_bytes()
+	frame+=msg_len+msg_nonce+msg_ack+msg_start+message
+	# Calculates the checksum then appends the modulo and remainder of it to the message, as well as the 255 stop byte
+	if chk:
+		msg_checksum = sum(frame)
+		frame.extend((msg_checksum//256, msg_checksum%256, 255))
+	else:
+		frame.extend((0,0,255))
+	return frame
 
 class InputChunkProtocol(asyncio.Protocol):
 	def connection_made(self, transport):
