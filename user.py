@@ -7,4 +7,10 @@ async def get_temperature() -> float:
 	print(f"Temperature requested: {temperature}°C")
 	return temperature
 
-library.start_network()
+async def main_loop():
+	if await library.get("switch", library.PROTOCOL_DATATYPES.bool):
+		print("Switch on!")
+	else:
+		print("Switch off!")
+
+library.start_network(device_id=1)
