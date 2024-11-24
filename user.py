@@ -1,4 +1,4 @@
-import library
+import library, asyncio
 
 @library.available_as("T")
 async def get_temperature() -> float:
@@ -8,9 +8,13 @@ async def get_temperature() -> float:
 	return temperature
 
 async def main_loop():
-	if await library.get("switch", library.PROTOCOL_DATATYPES.bool):
-		print("Switch on!")
-	else:
-		print("Switch off!")
+	while True:
+		if switch._value:
+			print("Switch on!")
+		else:
+			print("Switch off!")
+		await asyncio.sleep(5)
 
+switch = library.define_store("switch", library.DTYPES.bool)
+library.schedule(main_loop())
 library.start_network(device_id=1)
