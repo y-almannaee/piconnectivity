@@ -2,26 +2,24 @@ import asyncpio, asyncio
 import numpy as np
 from typing import Literal, Callable
 from random import randint
-from .utils import State, DTYPES, add_metadata, to_bytes, from_bytes, ENDIANNESS, writable_store, send_to, receive_from
+from .utils import State, DTYPES, add_metadata, to_bytes, from_bytes, ENDIANNESS, Writable_Store, Callable_Store, send_to, receive_from
 from .protocols import start_UART
 
-def available_as(variable_name: str) -> 'None':
+def available_as(variable_name: str, datatype: DTYPES) -> 'None':
 	'''Exposes the result of some function under a variable name'''
 	def inner_decorator(user_function: Callable):
-		for key in State().readables:
-			if key.startswith(variable_name):
-				raise Exception("Can't create a variable with a name that matches another variable's, or the beginning of another variable's\ne.g. neither variable T nor variable Temp can be added when another variable Temperature is already registered")
-		State().readables[variable_name] = user_function
+		store = Callable_Store(variable_name, datatype, user_function)
+		State().store.append(store)
 		return user_function
 	return inner_decorator
 
 def define_store(variable_name: str, datatype: DTYPES):
-	store = writable_store(variable_name, datatype)
-	State().writables.append(store)
+	store = Writable_Store(variable_name, datatype)
+	State().store.append(store)
 	return store
 
 def schedule(coro: Callable):
-	asyncio.get_event_loop().create_task(coro)
+	asyncio.get_event_loop().create_task(coro())
 
 async def get(other_device_id: int,
 	name: str,

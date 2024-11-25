@@ -4,15 +4,50 @@ from enum import Enum
 import numpy as np
 from asyncio.queues import Queue
 import struct
+from dataclasses import dataclass
 
 ENDIANNESS: Literal['little','big'] = 'little'
+
+@dataclass
+class Frame_Header:
+	"""Represents the header of a frame"""
+	recipient_id: int
+	length: int
+	nonce: bytes
+	ack: bool
+	
+	@classmethod
+	def from_bytes(cls, data: bytes):
+		"""Create header from bytes"""
+		if (data[2] not in [b'\x00', b'\xff']):
+			raise ValueError("ack bit not valid")
+		return cls(
+			recipient_id=data[0],
+			length=data[1],
+			nonce=data[2:3],
+			ack=bool(data[3])
+		)
+	
+	@property
+	def total_frame_length(self) -> int:
+		"""Calculate total frame length including metadata and checksums"""
+		return (
+			1 +			# Recipient byte
+			1 +			# Length byte
+			1 +			# Nonce byte
+			1 +			# Ack byte
+			1 +			# Start byte (255)
+			self.length + # Payload
+			2 +			# Checksum
+			1			# Stop byte (255)
+		)
 
 class DTYPES(Enum):
 	'''Enum for datatypes during transfer and their other properties'''
 	# Floating-point types
-	half = ("half", 2, False, 10)
-	float = float32 = ("float", 4, False, 12)
-	float64 = double = ("double", 8, False, 13)
+	half = float16 = ("float16", 2, False, 10)
+	float = float32 = ("float32", 4, False, 12)
+	float64 = double = ("float64", 8, False, 13)
 
 	# Signed integers
 	int8 = ("int8", 1, True, 20)
@@ -47,41 +82,71 @@ class DTYPES(Enum):
 	def convert(self) -> 'int':
 		"""Convert datatype to a single byte for protocol commands."""
 		return self.conversion
+	
+	def np(self) -> Callable:
+		"""Returns a function to convert Python datatypes to numpy types"""
+		if self.typename != 'char':
+			return getattr(np, self.typename)
+		else:
+			return str
 
-	def to_dict(self):
-		"""Get a dictionary representation of the datatype."""
-		return {"typename": self.typename, "size": self.size, "signed": self.signed}
-
-class writable_store():
-	_value: any = None
+class Writable_Store():
+	value: any = None
 	_name: str
 	_datatype: DTYPES
 
 	def __init__(self, name, datatype, default_value=None):
-		self._value = default_value
+		self.value = default_value
 		self._name = name
 		self._datatype = datatype
 
-class device():
+class Callable_Store():
+	_user_func: callable = None
+	_name: str
+	_datatype: DTYPES
+
+	def __init__(self, name, datatype, func: callable):
+		self._user_func = func
+		self._name = name
+		self._datatype = datatype
+
+	def __getattribute__(self, name: str):
+		if name == "value":
+			# If we come a-knockin' for the value
+			# of this store, just call the command
+			return self._user_func()
+		super().__getattribute__(name)
+
+	def read(self):
+		return self._user_func()
+
+class Device():
 	id: int
 	chain: List[int]
-	last_link: str
 	iface: str
 
-	def __init__(self, id: int, chain: List[int], last_link: str, iface: str):
+	def __init__(self, id: int, chain: List[int], iface: str):
 		self.id = id
 		self.chain = chain
-		self.last_link = last_link
 		self.iface = iface
+		Device.__references[id] = self
+
+	def update(self):
+		'''Updates the chain and interface if distance is shorter'''
+		pass
+
+	def distance(self):
+		'''Finds distance to node'''
+		return len(self.chain)
 
 class State():
 	'''Singleton that manages the state'''
 	_instance = None
 	running: bool						# whether the network is running
 	device_id: int						# the current device ID
-	readables: Dict[str, Callable]		# a KV pair of variable names and a callable that returns the variable's value
-	writables: List[writable_store]		# KV pair of variable name and data with type any
-	other_devices: List[device]			# List of other devices
+	store: List[Writable_Store | Callable_Store]		
+	other_devices: Dict[int, Device]	# Dict of other devices
+	max_depth: int
 	tasks: Dict[str, Queue] = {
 		"uart": Queue(),
 		"iic": Queue(),
@@ -94,9 +159,8 @@ class State():
 			cls._instance = super(State, cls).__new__(cls)
 			# Initialization
 			cls._instance.running = False
-			cls._instance.readables = {}
-			cls._instance.writables = []
-			cls._instance.other_devices = []
+			cls._instance.store = []
+			cls._instance.other_devices = {}
 		return cls._instance
 	
 def to_bytes(data: any) -> bytes:
@@ -128,7 +192,7 @@ def from_bytes(data: bytes, datatype: DTYPES) -> 'any':
 	else:
 		raise ValueError(f"Unsupported datatype: {datatype}")
 
-def add_metadata(message: bytes, nonce: bool = True, chk: bool = True, ack: bool = True) -> bytearray:
+def add_metadata(recipient_id: int, message: bytes, nonce: bool = True, chk: bool = True, ack: bool = True) -> bytearray:
 	'''
 	Take a message and adds the necessary metadata to it to complete the frame.
 
@@ -142,6 +206,7 @@ def add_metadata(message: bytes, nonce: bool = True, chk: bool = True, ack: bool
 		bytearray: The complete frame ready to send
 	'''
 	frame: bytearray = bytearray()
+	msg_id = recipient_id.to_bytes(1, byteorder=ENDIANNESS)
 	if not isinstance(message,bytes):
 		raise TypeError("Message should be a bytes object")
 	msg_len = len(message).to_bytes(1, byteorder=ENDIANNESS)
@@ -150,7 +215,7 @@ def add_metadata(message: bytes, nonce: bool = True, chk: bool = True, ack: bool
 	msg_nonce = token_bytes(1) if nonce else (0).to_bytes(1, byteorder=ENDIANNESS)
 	msg_ack = (255).to_bytes(1, byteorder=ENDIANNESS) if ack else (0).to_bytes(1, byteorder=ENDIANNESS)
 	msg_start = (255).to_bytes(1, byteorder=ENDIANNESS)
-	frame+=msg_len+msg_nonce+msg_ack+msg_start+message
+	frame+=msg_id+msg_len+msg_nonce+msg_ack+msg_start+message
 	# Calculates the checksum then appends the modulo and remainder of it to the message, as well as the 255 stop byte
 	if chk:
 		msg_checksum = sum(frame)
@@ -158,9 +223,3 @@ def add_metadata(message: bytes, nonce: bool = True, chk: bool = True, ack: bool
 	else:
 		frame.extend((0,0,255))
 	return frame
-
-async def send_to(id, frame, timeout=2.0) -> None | bool:
-	pass
-
-async def receive_from(id, timeout=2.0) -> None | bool:
-	pass
