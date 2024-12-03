@@ -11,8 +11,6 @@ from .utils import (
     ENDIANNESS,
     Writable_Store,
     Callable_Store,
-    send_to,
-    receive_from,
 )
 from .protocols import start_UART
 
@@ -22,7 +20,7 @@ def available_as(variable_name: str, datatype: DTYPES) -> "None":
 
     def inner_decorator(user_function: Callable):
         store = Callable_Store(variable_name, datatype, user_function)
-        State().store.append(store)
+        State().store[variable_name] = (store)
         return user_function
 
     return inner_decorator
@@ -30,7 +28,7 @@ def available_as(variable_name: str, datatype: DTYPES) -> "None":
 
 def define_store(variable_name: str, datatype: DTYPES):
     store = Writable_Store(variable_name, datatype)
-    State().store.append(store)
+    State().store[variable_name] = store
     return store
 
 
@@ -39,9 +37,8 @@ def schedule(coro: Callable):
 
 
 async def get(
-    other_device_id: int,
+    device_id: int,
     name: str,
-    datatype: DTYPES,
     timeout: float = 2.0,
 ) -> any:
     """
@@ -57,22 +54,21 @@ async def get(
             "Network is not running. Start the network before getting data."
         )
 
-    command = f"7{datatype.convert()}{name}".encode()
-    frame = add_metadata(command)
-    await send_to(other_device_id, frame)
+    device = State().other_devices[device_id]
+    protocol = device.iface
+    payload = bytearray()
+    payload.extend((7, len(name)))
+    payload.extend(name.encode())
+    frame = add_metadata(device.id, payload)
+    sequence = bytes(frame[3:4])
+    loop = asyncio.get_running_loop()
+    future = loop.create_future()
+    State().futures[sequence] = future
+    State().tasks[protocol].put_nowait(frame)
+    return future
 
-    try:
-        response_frame = await receive_from(other_device_id, timeout=timeout)
-    except asyncio.TimeoutError:
-        raise TimeoutError("No response received within timeout")
 
-    payload = response_frame[5:-4]
-    result = from_bytes(payload, datatype)
-
-    return result
-
-
-async def put(other_device_id: int, name: str, datatype: DTYPES, value: any):
+async def put(device_id: int, name: str, datatype: DTYPES, value: any):
     """
     Sends a variable with a specific name, datatype, and value to another MCU.
 
@@ -92,43 +88,17 @@ async def put(other_device_id: int, name: str, datatype: DTYPES, value: any):
             "Network is not running. Start the network before sending data."
         )
 
-    # Ensure the datatype matches the value
-    try:
-        value_bytes = to_bytes(value)
-    except Exception as e:
-        raise TypeError(f"Failed to convert value to bytes: {e}")
-
-    if len(value_bytes) != datatype.size:
-        raise ValueError(
-            f"The value does not match the expected size for datatype {datatype.typename}."
-        )
-
-    # Construct the message
-    command = "put"
-    name_bytes = name.encode("utf-8")  # Encode the variable name
-    name_len = len(name_bytes).to_bytes(1, ENDIANNESS)  # 1-byte length of the name
-    datatype_code = datatype.code.to_bytes(1, ENDIANNESS)  # 1-byte datatype code
-    target_device_id = other_device_id.to_bytes(1, ENDIANNESS)  # 1-byte device ID
-
-    # Assemble the message: [target ID, command, name_len, name, datatype_code, value]
-    payload = (
-        target_device_id
-        + command.encode("utf-8")
-        + name_len
-        + name_bytes
-        + datatype_code
-        + value_bytes
-    )
-
-    # Add metadata and send the frame
-    frame = add_metadata(payload, sequence=True, chk=True, ack=True)
-
-    # Send the frame through the appropriate protocol handler
-    if hasattr(State(), "protocol"):
-        transport = State().protocol.transport
-        transport.write(frame)
-    else:
-        raise Exception("No protocol handler available for sending data.")
+    device = State().other_devices[device_id]
+    protocol = device.iface
+    payload = bytearray()
+    payload.extend((6, len(name)))
+    payload.extend(name.encode())
+    payload.extend((datatype.convert()))
+    interp_func = datatype.np()
+    converted_value = interp_func(value)
+    payload.extend(to_bytes(converted_value))
+    frame = add_metadata(device.id, payload)
+    State().tasks[protocol].put_nowait(frame)
 
 
 def start_network(device_id: int = None) -> "None":
@@ -151,8 +121,10 @@ def start_network(device_id: int = None) -> "None":
     if device_id is None:
         device_id = randint(8, 119)
     State().device_id = device_id
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(_main())
+    try:
+        asyncio.run(_main())
+    except KeyboardInterrupt:
+        print("Stopping...")
 
 
 def stop_network() -> "None":

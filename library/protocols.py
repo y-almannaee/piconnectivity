@@ -1,5 +1,7 @@
 import asyncio
 import numpy as np
+from random import randint
+from datetime import datetime
 from typing import Optional
 from .utils import DTYPES, ENDIANNESS, Frame_Header, Device, add_metadata, put, get
 from serial import EIGHTBITS, PARITY_ODD, STOPBITS_TWO
@@ -27,6 +29,8 @@ class UART_Handler_Protocol(asyncio.Protocol):
         self.buffer = bytearray()
         self.transport = None
         self.header: Optional[Frame_Header] = None
+        self.device_found = False
+        self.pending_acks = {}
 
     def connection_made(self, transport):
         """
@@ -37,6 +41,26 @@ class UART_Handler_Protocol(asyncio.Protocol):
         print(f"Write buffer size: {self.transport.get_write_buffer_size()}")
         # Start the task queue checking process for this protocol
         asyncio.create_task(self.check_queue())
+        # Start the discovery task
+        asyncio.create_task(self.issue_discovery())
+
+    async def issue_discovery(self):
+        while True:
+            try:
+                if self.device_found:
+                    # If we have a device connected, just sleep
+                    await asyncio.sleep(5)
+                    continue
+                # Otherwise we broadcast ourselves as a new device to be added
+                discovery_payload = bytearray()
+                # 1 (add device) and our device ID
+                discovery_payload.extend((1, State().device_id))
+                discovery_frame = add_metadata(0, discovery_payload)
+                State().tasks["uart"].put_nowait(discovery_frame)
+                await asyncio.sleep(randint(3, 8))
+            except asyncio.CancelledError:
+                print("Discovery cancelled")
+                break
 
     async def check_queue(self):
         while True:
@@ -44,7 +68,11 @@ class UART_Handler_Protocol(asyncio.Protocol):
                 item = await State().tasks["uart"].get()
                 print("Processing queue item:", item)
                 # Send the item through the transport
-                self.transport.write(item.encode())
+                seq = bytes(item[3:4])
+                if item[0] == State().device_id and seq != b"\x00\x00":
+                    # If it's our own item and we want an ack
+                    self.pending_acks[seq] = (datetime.now(), item)
+                self.transport.write(item)
             except asyncio.CancelledError:
                 print("Queue processing stopped")
                 break
@@ -140,11 +168,13 @@ class UART_Handler_Protocol(asyncio.Protocol):
                 self.handle_put_command(payload)
             elif command_type == 7:  # Get Command
                 self.handle_get_command(payload)
+            elif command_type == 0:  # ack
+                self.handle_ack(payload)
             else:
                 print(f"Unknown command type: {command_type}")
 
             # Send acknowledgment if requested
-            # Get command excluded because it sends the value
+            # Get command is excluded because it sends the value
             # using the ack framework already
             if command_type != 7 and self.header.ack:
                 self._send_ack()
@@ -162,6 +192,18 @@ class UART_Handler_Protocol(asyncio.Protocol):
         new_frame = add_metadata(self.header.sender_id, payload)
         State().tasks["uart"].put_nowait(new_frame)
 
+    def handle_ack(self, payload: bytes):
+        seq = payload[2:3]
+        print(f"Ack received for {seq}")
+        if len(payload) > 4:
+            # if there are more than 4 bytes
+            # (indicating there is a get response)
+            dtype = DTYPES.from_protocol_number(payload[4])
+            data = DTYPES.revert(payload[5:], dtype)
+            print(f"Returning future")
+            State().futures[seq].set_result(data)
+        self.pending_acks.pop(seq)
+
     def handle_add_device(self, payload: bytes):
         """
         Handle the "add device" command.
@@ -175,20 +217,28 @@ class UART_Handler_Protocol(asyncio.Protocol):
         if device_id not in State().other_devices and (device_id != State().device_id):
             State().other_devices[device_id] = Device(device_id, chain, "uart")
             print(f"Device {device_id} added. Rebroadcasting...")
-            new_payload = bytearray(payload).extend(
-                State().device_id
-            )  # append our own id
+            new_payload = bytearray(payload)
+            new_payload.extend(State().device_id)  # append our own id
             new_frame = add_metadata(0, new_payload)
             for protocol in State().tasks:
                 # Distribute the new frame to all protocols
                 State().tasks[protocol].put_nowait(new_frame)
         else:
             print(f"Device {device_id} already exists.")
+            State().other_devices[device_id].update(chain)
 
         if len(chain) == 0:
             # If this device is adjacent to our node (it means it initiated the addition
             # for itself), we should send all of our registered devices to it
-            pass
+            self.device_found = True
+            for other_device_id, dev in State().other_devices.items():
+                # for each device
+                for chains in dev.chain:
+                    new_payload = bytearray()
+                    new_payload.extend((0, other_device_id))
+                    new_payload.extend([d.id for d in chains])
+                    new_frame = add_metadata(device_id, new_payload)
+                    State().tasks[protocol].put_nowait(new_frame)
 
     def handle_remove_device(self, payload):
         """
@@ -219,8 +269,9 @@ class UART_Handler_Protocol(asyncio.Protocol):
         sender_id = self.header.sender_id
         sequence = self.header.sequence
         new_payload = bytearray()
-        new_payload.extend((0,255))
+        new_payload.extend((0, 255))
         new_payload += sequence
+        new_payload.extend((datatype.convert()))
         new_payload += datatype.to_bytes(value)
         new_frame = add_metadata(sender_id, new_payload)
         State().tasks["uart"].put_nowait(new_frame)

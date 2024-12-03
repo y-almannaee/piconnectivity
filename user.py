@@ -17,4 +17,4 @@ async def main_loop():
 
 switch = library.define_store("switch", library.DTYPES.bool)
 library.schedule(main_loop)
-library.start_network(device_id=1)
+library.start_network(device_id=8)

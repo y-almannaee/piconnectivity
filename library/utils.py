@@ -1,4 +1,4 @@
-from typing import Literal, Dict, Callable, List
+from typing import Literal, Dict, Callable, List, Union
 from secrets import token_bytes
 from enum import Enum
 import numpy as np
@@ -120,7 +120,7 @@ class DTYPES(Enum):
             return str
 
     @classmethod
-    def revert(cls, data, datatype) -> "float" | "int" | str | "bool":
+    def revert(cls, data, datatype) -> "float | int | str | bool":
         bo = "<" if ENDIANNESS == "little" else ">"  # byte order
         if datatype in (DTYPES.int8, DTYPES.int16, DTYPES.int32, DTYPES.int64):
             return int.from_bytes(data, byteorder=ENDIANNESS, signed=True)
@@ -189,7 +189,7 @@ class Callable_Store:
 
 class Device:
     id: int
-    chain: List[int]
+    chain: List[List["Device"]]
     iface: str
 
     def __init__(self, id: int, chain: List[int], iface: str):
@@ -197,7 +197,7 @@ class Device:
         self.chain = chain
         self.iface = iface
 
-    def update(self):
+    def update(self, new_chain):
         """Updates the chain and interface if distance is shorter"""
         pass
 
@@ -215,7 +215,7 @@ class State:
     device_id: int  # the current device ID
     store: Dict[str, Writable_Store | Callable_Store]
     other_devices: Dict[int, Device]  # Dict of other devices
-    max_depth: int
+    futures: Dict[str, asyncio.Future]
     tasks: Dict[str, Queue] = {
         "uart": Queue(),
         "iic": Queue(),
@@ -227,9 +227,11 @@ class State:
             print("Initializing the state")
             cls._instance = super(State, cls).__new__(cls)
             # Initialization
+            cls._instance.shutdown = asyncio.Event()
             cls._instance.shutdown.set()
-            cls._instance.store = []
+            cls._instance.store = {}
             cls._instance.other_devices = {}
+            cls._instance.futures = {}
         return cls._instance
 
     def running(self) -> None:
@@ -254,7 +256,8 @@ def to_bytes(data: any, length=None) -> bytes:
             return data.byteswap().tobytes()
     if isinstance(data, int):
         if length is None:
-            return data.to_bytes((data.bit_length() + 7) // 8, byteorder=ENDIANNESS)
+            blen = data.bit_length() if data.bit_length() != 0 else 1
+            return data.to_bytes((blen + 7) // 8, byteorder=ENDIANNESS)
         else:
             return data.to_bytes(length, byteorder=ENDIANNESS)
     raise TypeError("Unsupported type for to_bytes")
@@ -278,6 +281,8 @@ def add_metadata(
     frame: bytearray = bytearray()
     msg_sender = to_bytes(State().device_id)
     msg_recipient = to_bytes(recipient_id)
+    if isinstance(message, bytearray):
+        message = bytes(message)
     if not isinstance(message, bytes):
         raise TypeError("Message should be a bytes object")
     msg_len = to_bytes(len(message))
@@ -309,7 +314,7 @@ def put(payload: bytes) -> None:
     Handle the "put" command.
     Updates a variable with the specified name, datatype, and value.
     """
-    if payload[0] is not 6:
+    if payload[0] != 6:
         raise Exception("Not a put command.")
 
     if len(payload) < 3:
@@ -337,7 +342,7 @@ def put(payload: bytes) -> None:
 
 
 def get(payload: bytes) -> tuple[DTYPES, bytes]:
-    if payload[0] is not 7:
+    if payload[0] != 7:
         raise Exception("Not a get command.")
 
     if len(payload) < 3:
