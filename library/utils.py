@@ -29,7 +29,7 @@ class Frame_Header:
             sender_id=data[0],
             recipient_id=data[1],
             length=data[2],
-            sequence=data[3:4],
+            sequence=data[3:5],
             ack=bool(data[5]),
         )
 
@@ -324,6 +324,8 @@ def put(payload: bytes) -> None:
     # Extract variable name length and name
     name_length = payload[1]
     name = payload[2 : 2 + name_length].decode()
+    
+    print(f"Request to put in store '{name}'")
 
     # Extract datatype and value
     datatype = payload[2 + name_length + 1]
@@ -352,6 +354,8 @@ def get(payload: bytes) -> tuple[DTYPES, bytes]:
     # Extract variable name length and name
     name_length = payload[1]
     name = payload[2 : 2 + name_length].decode()
+
+    print(f"Request for store '{name}'")
 
     try:
         value = State().store[name].read()

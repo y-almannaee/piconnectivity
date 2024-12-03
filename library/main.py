@@ -36,11 +36,11 @@ def schedule(coro: Callable):
     State().scheduled_tasks.append(coro())
 
 
-async def get(
+def get(
     device_id: int,
     name: str,
     timeout: float = 2.0,
-) -> any:
+) -> asyncio.Future:
     """
     Gets a variable with a specific name, datatype from another MCU.
 
@@ -56,8 +56,8 @@ async def get(
 
     try:
         device = State().other_devices[device_id]
-    except KeyError:
-        raise Exception(f"Device with ID {device_id} doesn't exist")
+    except KeyError as e:
+        raise Exception(f"Device with ID {device_id} doesn't exist") from None
     protocol = device.iface
     payload = bytearray()
     payload.extend((7, len(name)))
@@ -93,13 +93,13 @@ async def put(device_id: int, name: str, datatype: DTYPES, value: any):
 
     try:
         device = State().other_devices[device_id]
-    except KeyError:
-        raise Exception(f"Device with ID {device_id} doesn't exist")
+    except KeyError as e:
+        raise Exception(f"Device with ID {device_id} doesn't exist") from None
     protocol = device.iface
     payload = bytearray()
     payload.extend((6, len(name)))
     payload.extend(name.encode())
-    payload.extend((datatype.convert()))
+    payload.extend((datatype.convert(),))
     interp_func = datatype.np()
     converted_value = interp_func(value)
     payload.extend(to_bytes(converted_value))

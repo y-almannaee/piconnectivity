@@ -141,8 +141,8 @@ class UART_Handler_Protocol(asyncio.Protocol):
             # Process the validated frame
             try:
                 self._process_frame(frame)
-            except Exception as e:
-                print(f"Error processing frame: {e}")
+            # except Exception as e:
+            #     print(f"Error processing frame: {e}")
             finally:
                 # Remove processed frame from buffer
                 self.buffer = self.buffer[self.header.total_frame_length :]
@@ -178,11 +178,12 @@ class UART_Handler_Protocol(asyncio.Protocol):
             # using the ack framework already
             if command_type != 7 and self.header.ack:
                 self._send_ack()
-
-        except Exception as e:
-            print(f"Error in command handler: {e}")
-            if self.header.ack:
-                self._send_ack(success=False)
+        finally:
+            pass
+        # except Exception as e:
+        #     print(f"Error in command handler: {e}")
+        #     if self.header.ack:
+        #         self._send_ack(success=False)
 
     def _send_ack(self, success=True):
         if self.header.ack is False:
@@ -195,11 +196,11 @@ class UART_Handler_Protocol(asyncio.Protocol):
         State().tasks["uart"].put_nowait(new_frame)
 
     def handle_ack(self, payload: bytes):
-        seq = bytes(payload[2:4])
+        seq = bytes(payload[1:3])
         try:
             self.pending_acks.pop(seq)
-        except KeyError:
-            raise Exception(f"No such ack sequence {seq}")
+        except KeyError as e:
+            raise Exception(f"No such ack sequence {seq}") from None
         print(f"Ack received for {seq}")
         if len(payload) > 4:
             # if there are more than 4 bytes
@@ -219,11 +220,13 @@ class UART_Handler_Protocol(asyncio.Protocol):
 
         device_id = payload[1]
         chain = [dev for dev in payload[2:]]
-        if device_id not in State().other_devices and (device_id != State().device_id):
+        if device_id != State().device_id:
+            return
+        if device_id not in State().other_devices:
             State().other_devices[device_id] = Device(device_id, chain, "uart")
             print(f"Device {device_id} added. Rebroadcasting...")
             new_payload = bytearray(payload)
-            new_payload.extend((State().device_id))  # append our own id
+            new_payload.extend((State().device_id,))  # append our own id
             new_frame = add_metadata(0, new_payload)
             for protocol in State().tasks:
                 # Distribute the new frame to all protocols
@@ -237,6 +240,8 @@ class UART_Handler_Protocol(asyncio.Protocol):
             # for itself), we should send all of our registered devices to it
             self.device_found = True
             for other_device_id, dev in State().other_devices.items():
+                if other_device_id == device_id:
+                    continue
                 # for each device
                 for chains in dev.chain:
                     new_payload = bytearray()
@@ -276,7 +281,7 @@ class UART_Handler_Protocol(asyncio.Protocol):
         new_payload = bytearray()
         new_payload.extend((0, 255))
         new_payload += sequence
-        new_payload.extend((datatype.convert()))
+        new_payload.extend((datatype.convert(),))
         new_payload += datatype.to_bytes(value)
         new_frame = add_metadata(sender_id, new_payload)
         State().tasks["uart"].put_nowait(new_frame)
