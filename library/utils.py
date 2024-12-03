@@ -14,6 +14,7 @@ ENDIANNESS: Literal["little", "big"] = "little"
 class Frame_Header:
     """Represents the header of a frame"""
 
+    sender_id: int
     recipient_id: int
     length: int
     sequence: bytes
@@ -22,11 +23,23 @@ class Frame_Header:
     @classmethod
     def from_bytes(cls, data: bytes):
         """Create header from bytes"""
-        if data[2] not in [b"\x00", b"\xff"]:
+        if data[5] not in [0, 255]:
             raise ValueError("ack bit not valid")
         return cls(
-            recipient_id=data[0], length=data[1], nonce=data[2:3], ack=bool(data[3])
+            sender_id=data[0],
+            recipient_id=data[1],
+            length=data[2],
+            sequence=data[3:4],
+            ack=bool(data[5]),
         )
+
+    @classmethod
+    def min_for_header(cls):
+        return 7
+
+    @classmethod
+    def start_byte(cls):
+        return 6
 
     @property
     def total_frame_length(self) -> int:
@@ -90,6 +103,11 @@ class DTYPES(Enum):
                 return item
         raise ValueError(f"Unknown datatype: {number}")
 
+    def to_bytes(self, value) -> bytes:
+        interpret_func = self.np()
+        interpreted = interpret_func(value)
+        return to_bytes(interpreted)
+
     def convert(self) -> "int":
         """Convert datatype to a single byte for protocol commands."""
         return self.conversion
@@ -134,10 +152,10 @@ class Writable_Store:
 
     def read(self):
         return self.value
-    
+
     def write(self, value):
         self.value = value
-    
+
     def type(self):
         return self._datatype
 
@@ -161,10 +179,10 @@ class Callable_Store:
 
     def read(self):
         return self._user_func()
-    
+
     def write(self):
         raise Exception(f"Store {self._name} cannot be written to")
-    
+
     def type(self):
         return self._datatype
 
@@ -304,20 +322,21 @@ def put(payload: bytes) -> None:
     # Extract datatype and value
     datatype = payload[2 + name_length + 1]
     datatype = DTYPES.from_protocol_number(datatype)
-    value_data = payload[2 + name_length + 2 : ]
+    value_data = payload[2 + name_length + 2 :]
     value = DTYPES.revert(value_data, datatype)
 
     # Update the variable in state
     if name not in State().store:
         raise Exception(f"Store '{name}' not found in state")
-        
+
     if State().store[name].type() != datatype:
         raise Exception(f"Store '{name}' not of type {datatype}")
 
     State().store[name].write(value)
     print(f"Updated store '{name}' with value {value}")
 
-def get(payload: bytes) -> any:
+
+def get(payload: bytes) -> tuple[DTYPES, bytes]:
     if payload[0] is not 7:
         raise Exception("Not a get command.")
 
@@ -328,9 +347,9 @@ def get(payload: bytes) -> any:
     name_length = payload[1]
     name = payload[2 : 2 + name_length].decode()
 
-    # Extract datatype and value
-    datatype = payload[2 + name_length + 1]
-    datatype = DTYPES.from_protocol_number(datatype)
-    value_data = payload[2 + name_length + 2 : ]
-    value = DTYPES.revert(value_data, datatype)
-    return None
+    try:
+        value = State().store[name].read()
+    except KeyError:
+        value = None
+    datatype = State().store[name].type()
+    return datatype, value

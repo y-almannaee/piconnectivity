@@ -59,11 +59,13 @@ class UART_Handler_Protocol(asyncio.Protocol):
             # If we don't have a header yet, try to parse one
             if not self.header:
                 # Minimum bytes needed for header + start byte
-                if len(self.buffer) < 5:
+                if len(self.buffer) < Frame_Header.min_for_header():
                     break
 
                 # Validate start byte
-                if self.buffer[5] != 255:  # Start byte should be 255
+                if (
+                    self.buffer[Frame_Header.start_byte()] != 255
+                ):  # Start byte should be 255
                     # No start byte found, clear buffer
                     print("No start byte found!")
                     self.buffer.clear()
@@ -92,7 +94,6 @@ class UART_Handler_Protocol(asyncio.Protocol):
                 self.header = None
                 continue
 
-            # Validate checksum
             # Exclude checksum and stop byte
             calculated_checksum = sum(frame[:-3])
             # Reversal of what we did when constructing
@@ -121,6 +122,12 @@ class UART_Handler_Protocol(asyncio.Protocol):
 
     def _process_frame(self, frame: bytes):
         """Process a complete, validated frame"""
+        recipient = self.header.recipient_id
+        if recipient != State().device_id:
+            # Pass the frame to the next device
+            iface = State().other_devices[recipient].iface
+            State().tasks[iface].put_nowait(frame)
+            return
         payload = frame[6:-3]  # Skip header and checksum/stop byte
         command_type = payload[0]
 
@@ -198,11 +205,17 @@ class UART_Handler_Protocol(asyncio.Protocol):
     def handle_put_command(self, payload):
         put(payload)
 
-    def handle_get_command(self, payload):
-        value = get(payload)
+    def handle_get_command(self, payload, return_id):
+        datatype, value = get(payload)
         recipient_id = self.header.recipient_id
         sequence = self.header.sequence
-        State().tasks["uart"].put_nowait(####)
+        new_payload = bytearray()
+        new_payload.extend((0))
+        new_payload += sequence
+        new_payload += datatype.to_bytes(value)
+        new_frame = add_metadata(recipient_id, new_payload)
+        State().tasks["uart"].put_nowait(new_frame)
+
 
 async def start_UART(pins: str):
     loop = asyncio.get_event_loop()
