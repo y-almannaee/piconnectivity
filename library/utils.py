@@ -329,9 +329,9 @@ def put(payload: bytes) -> None:
     print(f"Request to put in store '{name}'")
 
     # Extract datatype and value
-    datatype = payload[2 + name_length + 1]
+    datatype = payload[2 + name_length]
     datatype = DTYPES.from_protocol_number(datatype)
-    value_data = payload[2 + name_length + 2 :]
+    value_data = payload[2 + name_length + 1 :]
     value = DTYPES.revert(value_data, datatype)
 
     # Update the variable in state

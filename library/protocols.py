@@ -248,7 +248,7 @@ class UART_Handler_Protocol(asyncio.Protocol):
             if not self.device_found:
                 self.device_found = True
                 new_payload = bytearray()
-                new_payload.extend((0, State().device_id))
+                new_payload.extend((1, State().device_id))
                 new_frame = add_metadata(device_id, new_payload)
                 State().tasks["uart"].put_nowait(new_frame)
             for other_device_id, dev in State().other_devices.items():
@@ -257,7 +257,7 @@ class UART_Handler_Protocol(asyncio.Protocol):
                 # for each device
                 for chains in dev.chain:
                     new_payload = bytearray()
-                    new_payload.extend((0, other_device_id))
+                    new_payload.extend((1, other_device_id))
                     new_payload.extend([d.id for d in chains])
                     new_frame = add_metadata(device_id, new_payload)
                     State().tasks[protocol].put_nowait(new_frame)

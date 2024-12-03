@@ -112,7 +112,8 @@ async def put(device_id: int, name: str, datatype: DTYPES, value: any):
 
 
 async def wait_for_connect(device_id: int):
-    State().awaiting_connection[device_id] = asyncio.Event()
+    if device_id not in State().awaiting_connection:
+        State().awaiting_connection[device_id] = asyncio.Event()
     await State().awaiting_connection[device_id].wait()
 
 
