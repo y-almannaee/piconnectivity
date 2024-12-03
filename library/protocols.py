@@ -226,6 +226,7 @@ class UART_Handler_Protocol(asyncio.Protocol):
 
         device_id = payload[1]
         chain = [dev for dev in payload[2:]]
+        print(f"Received add command for ID {device_id} and chain {chain}")
         if device_id == State().device_id:
             return
         if device_id not in State().other_devices:
@@ -249,7 +250,7 @@ class UART_Handler_Protocol(asyncio.Protocol):
                 new_payload = bytearray()
                 new_payload.extend((0, State().device_id))
                 new_frame = add_metadata(device_id, new_payload)
-                State().tasks[protocol].put_nowait(new_frame)
+                State().tasks["uart"].put_nowait(new_frame)
             for other_device_id, dev in State().other_devices.items():
                 if other_device_id == device_id:
                     continue
