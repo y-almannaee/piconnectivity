@@ -122,7 +122,8 @@ def start_network(device_id: int = None) -> "None":
         device_id = randint(8, 119)
     State().device_id = device_id
     try:
-        asyncio.run(_main())
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(_main())
     except KeyboardInterrupt:
         print("Stopping...")
 

@@ -151,7 +151,7 @@ class UART_Handler_Protocol(asyncio.Protocol):
     def _process_frame(self, frame: bytes):
         """Process a complete, validated frame"""
         recipient = self.header.recipient_id
-        if recipient != State().device_id:
+        if recipient != 0 and recipient != State().device_id:
             # Pass the frame to the next device
             iface = State().other_devices[recipient].iface
             State().tasks[iface].put_nowait(frame)
