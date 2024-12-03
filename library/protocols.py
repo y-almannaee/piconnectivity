@@ -185,11 +185,13 @@ class UART_Handler_Protocol(asyncio.Protocol):
                 self._send_ack(success=False)
 
     def _send_ack(self, success=True):
+        if self.header.ack is False:
+            return
         payload = bytearray()
         ack = 255 if success else 127
         payload.extend((0, ack))
         payload += self.header.sequence
-        new_frame = add_metadata(self.header.sender_id, payload)
+        new_frame = add_metadata(self.header.sender_id, payload, ack=False)
         State().tasks["uart"].put_nowait(new_frame)
 
     def handle_ack(self, payload: bytes):
