@@ -244,7 +244,12 @@ class UART_Handler_Protocol(asyncio.Protocol):
         if len(chain) == 0:
             # If this device is adjacent to our node (it means it initiated the addition
             # for itself), we should send all of our registered devices to it
-            self.device_found = True
+            if not self.device_found:
+                self.device_found = True
+                new_payload = bytearray()
+                new_payload.extend((0, State().device_id))
+                new_frame = add_metadata(device_id, new_payload)
+                State().tasks[protocol].put_nowait(new_frame)
             for other_device_id, dev in State().other_devices.items():
                 if other_device_id == device_id:
                     continue
