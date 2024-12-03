@@ -144,16 +144,23 @@ class UART_Handler_Protocol(asyncio.Protocol):
                 print(f"Unknown command type: {command_type}")
 
             # Send acknowledgment if requested
-            if self.header.ack:
-                self._send_ack(self.header.sequence)
+            # Get command excluded because it sends the value
+            # using the ack framework already
+            if command_type != 7 and self.header.ack:
+                self._send_ack()
 
         except Exception as e:
             print(f"Error in command handler: {e}")
             if self.header.ack:
                 self._send_ack(self.header.sequence, success=False)
 
-    def _send_ack(self, nonce, success=True):
-        pass
+    def _send_ack(self, success=True):
+        payload = bytearray()
+        ack = 255 if success else 127
+        payload.extend((0, ack))
+        payload += self.header.sequence
+        new_frame = add_metadata(self.header.sender_id, payload)
+        State().tasks["uart"].put_nowait(new_frame)
 
     def handle_add_device(self, payload: bytes):
         """
@@ -205,15 +212,17 @@ class UART_Handler_Protocol(asyncio.Protocol):
     def handle_put_command(self, payload):
         put(payload)
 
-    def handle_get_command(self, payload, return_id):
+    def handle_get_command(self, payload):
         datatype, value = get(payload)
-        recipient_id = self.header.recipient_id
+        if value is None:
+            self._send_ack(success=False)
+        sender_id = self.header.sender_id
         sequence = self.header.sequence
         new_payload = bytearray()
-        new_payload.extend((0))
+        new_payload.extend((0,255))
         new_payload += sequence
         new_payload += datatype.to_bytes(value)
-        new_frame = add_metadata(recipient_id, new_payload)
+        new_frame = add_metadata(sender_id, new_payload)
         State().tasks["uart"].put_nowait(new_frame)
 
 
