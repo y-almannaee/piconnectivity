@@ -196,7 +196,7 @@ class UART_Handler_Protocol(asyncio.Protocol):
         State().tasks["uart"].put_nowait(new_frame)
 
     def handle_ack(self, payload: bytes):
-        seq = bytes(payload[1:3])
+        seq = bytes(payload[2:4])
         try:
             self.pending_acks.pop(seq)
         except KeyError as e:
