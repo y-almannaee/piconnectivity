@@ -20,7 +20,7 @@ def available_as(variable_name: str, datatype: DTYPES) -> "None":
 
     def inner_decorator(user_function: Callable):
         store = Callable_Store(variable_name, datatype, user_function)
-        State().store[variable_name] = (store)
+        State().store[variable_name] = store
         return user_function
 
     return inner_decorator
@@ -33,7 +33,7 @@ def define_store(variable_name: str, datatype: DTYPES):
 
 
 def schedule(coro: Callable):
-    asyncio.get_event_loop().create_task(coro())
+    State().scheduled_tasks.append(coro())
 
 
 async def get(
@@ -54,7 +54,10 @@ async def get(
             "Network is not running. Start the network before getting data."
         )
 
-    device = State().other_devices[device_id]
+    try:
+        device = State().other_devices[device_id]
+    except KeyError:
+        raise Exception(f"Device with ID {device_id} doesn't exist")
     protocol = device.iface
     payload = bytearray()
     payload.extend((7, len(name)))
@@ -88,7 +91,10 @@ async def put(device_id: int, name: str, datatype: DTYPES, value: any):
             "Network is not running. Start the network before sending data."
         )
 
-    device = State().other_devices[device_id]
+    try:
+        device = State().other_devices[device_id]
+    except KeyError:
+        raise Exception(f"Device with ID {device_id} doesn't exist")
     protocol = device.iface
     payload = bytearray()
     payload.extend((6, len(name)))
@@ -101,6 +107,11 @@ async def put(device_id: int, name: str, datatype: DTYPES, value: any):
     State().tasks[protocol].put_nowait(frame)
 
 
+async def wait_for_connect(device_id: int):
+    State().awaiting_connection[device_id] = asyncio.Event()
+    await State().awaiting_connection[device_id].wait()
+
+
 def start_network(device_id: int = None) -> "None":
     """
     Begin searching for connections.
@@ -110,6 +121,8 @@ def start_network(device_id: int = None) -> "None":
     """
     # IDs 0 is reserved for a broadcast
     # ID 248-255 is reserved for higher addressing modes
+    if device_id is None:
+        device_id = randint(8, 119)
     if (device_id > 0x77) or (device_id < 8):
         raise Exception(
             f"Device ID {device_id} is reserved.\nEnsure address is between 8 and 119 (inclusive of endpoints)"
@@ -118,8 +131,6 @@ def start_network(device_id: int = None) -> "None":
         raise Exception(
             "Network already running\nCan't run two networks from the same device"
         )
-    if device_id is None:
-        device_id = randint(8, 119)
     State().device_id = device_id
     try:
         loop = asyncio.get_event_loop()
@@ -142,6 +153,8 @@ async def _main() -> "None":
     serial_pins = "/dev/serial0"
     # serial_usb = '/dev/ttyUSB0'
     await start_UART(serial_pins)
+    for task in State().scheduled_tasks:
+        asyncio.get_running_loop().create_task(task)
     await State().shutdown.wait()
     # TODO: Serial when RX is high
 

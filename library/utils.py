@@ -196,6 +196,8 @@ class Device:
         self.id = id
         self.chain = chain
         self.iface = iface
+        if id in State().awaiting_connection:
+            State().awaiting_connection[id].set()
 
     def update(self, new_chain):
         """Updates the chain and interface if distance is shorter"""
@@ -214,8 +216,10 @@ class State:
     pi: asyncpio.pi
     device_id: int  # the current device ID
     store: Dict[str, Writable_Store | Callable_Store]
-    other_devices: Dict[int, Device]  # Dict of other devices
-    futures: Dict[str, asyncio.Future]
+    other_devices: Dict[int, Device] = {}  # Dict of other devices
+    awaiting_connection: Dict[int, asyncio.Event] = {}
+    futures: Dict[str, asyncio.Future] = {}
+    scheduled_tasks = []
     tasks: Dict[str, Queue] = {
         "uart": Queue(),
         "iic": Queue(),
@@ -229,9 +233,6 @@ class State:
             # Initialization
             cls._instance.shutdown = asyncio.Event()
             cls._instance.shutdown.set()
-            cls._instance.store = {}
-            cls._instance.other_devices = {}
-            cls._instance.futures = {}
         return cls._instance
 
     def running(self) -> None:
