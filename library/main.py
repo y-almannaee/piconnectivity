@@ -63,7 +63,7 @@ async def get(
     payload.extend((7, len(name)))
     payload.extend(name.encode())
     frame = add_metadata(device.id, payload)
-    sequence = bytes(frame[3:4])
+    sequence = bytes(frame[3:5])
     loop = asyncio.get_running_loop()
     future = loop.create_future()
     State().futures[sequence] = future

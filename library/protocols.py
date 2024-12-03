@@ -68,7 +68,7 @@ class UART_Handler_Protocol(asyncio.Protocol):
                 item = await State().tasks["uart"].get()
                 print("Processing queue item:", item)
                 # Send the item through the transport
-                seq = bytes(item[3:4])
+                seq = bytes(item[3:5])
                 if item[0] == State().device_id and seq != b"\x00\x00":
                     # If it's our own item and we want an ack
                     self.pending_acks[seq] = (datetime.now(), item)
@@ -156,7 +156,7 @@ class UART_Handler_Protocol(asyncio.Protocol):
             iface = State().other_devices[recipient].iface
             State().tasks[iface].put_nowait(frame)
             return
-        payload = frame[6:-3]  # Skip header and checksum/stop byte
+        payload = frame[self.header.start_byte()+1:-3]  # Skip header and checksum/stop byte
         command_type = payload[0]
 
         try:
@@ -182,7 +182,7 @@ class UART_Handler_Protocol(asyncio.Protocol):
         except Exception as e:
             print(f"Error in command handler: {e}")
             if self.header.ack:
-                self._send_ack(self.header.sequence, success=False)
+                self._send_ack(success=False)
 
     def _send_ack(self, success=True):
         payload = bytearray()
@@ -193,7 +193,11 @@ class UART_Handler_Protocol(asyncio.Protocol):
         State().tasks["uart"].put_nowait(new_frame)
 
     def handle_ack(self, payload: bytes):
-        seq = payload[2:3]
+        seq = bytes(payload[2:4])
+        try:
+            self.pending_acks.pop(seq)
+        except KeyError:
+            raise Exception(f"No such ack sequence {seq}")
         print(f"Ack received for {seq}")
         if len(payload) > 4:
             # if there are more than 4 bytes
@@ -202,7 +206,6 @@ class UART_Handler_Protocol(asyncio.Protocol):
             data = DTYPES.revert(payload[5:], dtype)
             print(f"Returning future")
             State().futures[seq].set_result(data)
-        self.pending_acks.pop(seq)
 
     def handle_add_device(self, payload: bytes):
         """
@@ -218,7 +221,7 @@ class UART_Handler_Protocol(asyncio.Protocol):
             State().other_devices[device_id] = Device(device_id, chain, "uart")
             print(f"Device {device_id} added. Rebroadcasting...")
             new_payload = bytearray(payload)
-            new_payload.extend(State().device_id)  # append our own id
+            new_payload.extend((State().device_id))  # append our own id
             new_frame = add_metadata(0, new_payload)
             for protocol in State().tasks:
                 # Distribute the new frame to all protocols

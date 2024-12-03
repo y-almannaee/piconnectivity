@@ -215,7 +215,7 @@ class State:
     shutdown: asyncio.Event  # whether the network is shutting down
     pi: asyncpio.pi
     device_id: int  # the current device ID
-    store: Dict[str, Writable_Store | Callable_Store]
+    store: Dict[str, Writable_Store | Callable_Store] = {}
     other_devices: Dict[int, Device] = {}  # Dict of other devices
     awaiting_connection: Dict[int, asyncio.Event] = {}
     futures: Dict[str, asyncio.Future] = {}
