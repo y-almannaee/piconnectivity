@@ -150,7 +150,7 @@ class Writable_Store:
         self._name = name
         self._datatype = datatype
 
-    def read(self):
+    async def read(self):
         return self.value
 
     def write(self, value):
@@ -161,7 +161,7 @@ class Writable_Store:
 
 
 class Callable_Store:
-    _user_func: callable = None
+    _user_func: callable
     _name: str
     _datatype: DTYPES
 
@@ -170,15 +170,16 @@ class Callable_Store:
         self._name = name
         self._datatype = datatype
 
-    def __getattribute__(self, name: str):
-        if name == "value":
-            # If we come a-knockin' for the value
-            # of this store, just call the command
-            return self._user_func()
-        super().__getattribute__(name)
+    # def __getattribute__(self, name: str):
+    #     if name == "value":
+    #         # If we come a-knockin' for the value
+    #         # of this store, just call the command
+    #         return self._user_func()
+    #     super().__getattribute__(name)
 
-    def read(self):
-        return self._user_func()
+    async def read(self):
+        value = await self._user_func()
+        return value
 
     def write(self):
         raise Exception(f"Store {self._name} cannot be written to")
@@ -324,7 +325,7 @@ def put(payload: bytes) -> None:
     # Extract variable name length and name
     name_length = payload[1]
     name = payload[2 : 2 + name_length].decode()
-    
+
     print(f"Request to put in store '{name}'")
 
     # Extract datatype and value
@@ -344,7 +345,7 @@ def put(payload: bytes) -> None:
     print(f"Updated store '{name}' with value {value}")
 
 
-def get(payload: bytes) -> tuple[DTYPES, bytes]:
+async def get(payload: bytes) -> tuple[DTYPES, bytes]:
     if payload[0] != 7:
         raise Exception("Not a get command.")
 
@@ -355,10 +356,8 @@ def get(payload: bytes) -> tuple[DTYPES, bytes]:
     name_length = payload[1]
     name = payload[2 : 2 + name_length].decode()
 
-    print(f"Request for store '{name}'")
-
     try:
-        value = State().store[name].read()
+        value = await State().store[name].read()
     except KeyError:
         value = None
     datatype = State().store[name].type()

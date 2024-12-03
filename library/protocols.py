@@ -156,7 +156,9 @@ class UART_Handler_Protocol(asyncio.Protocol):
             iface = State().other_devices[recipient].iface
             State().tasks[iface].put_nowait(frame)
             return
-        payload = frame[self.header.start_byte()+1:-3]  # Skip header and checksum/stop byte
+        payload = frame[
+            self.header.start_byte() + 1 : -3
+        ]  # Skip header and checksum/stop byte
         command_type = payload[0]
 
         try:
@@ -167,7 +169,11 @@ class UART_Handler_Protocol(asyncio.Protocol):
             elif command_type == 6:  # Put Command
                 self.handle_put_command(payload)
             elif command_type == 7:  # Get Command
-                self.handle_get_command(payload)
+                asyncio.create_task(
+                    self.handle_get_command(
+                        payload, self.header.sender_id, self.header.sequence
+                    )
+                )
             elif command_type == 0:  # ack
                 self.handle_ack(payload)
             else:
@@ -220,7 +226,7 @@ class UART_Handler_Protocol(asyncio.Protocol):
 
         device_id = payload[1]
         chain = [dev for dev in payload[2:]]
-        if device_id != State().device_id:
+        if device_id == State().device_id:
             return
         if device_id not in State().other_devices:
             State().other_devices[device_id] = Device(device_id, chain, "uart")
@@ -272,12 +278,10 @@ class UART_Handler_Protocol(asyncio.Protocol):
     def handle_put_command(self, payload):
         put(payload)
 
-    def handle_get_command(self, payload):
-        datatype, value = get(payload)
+    async def handle_get_command(self, payload: bytes, sender_id: int, sequence: bytes):
+        datatype, value = await get(payload)
         if value is None:
             self._send_ack(success=False)
-        sender_id = self.header.sender_id
-        sequence = self.header.sequence
         new_payload = bytearray()
         new_payload.extend((0, 255))
         new_payload += sequence

@@ -19,9 +19,13 @@ def available_as(variable_name: str, datatype: DTYPES) -> "None":
     """Exposes the result of some function under a variable name"""
 
     def inner_decorator(user_function: Callable):
+        def tmp(*args, **kwargs):
+            return user_function(*args, **kwargs)
+
         store = Callable_Store(variable_name, datatype, user_function)
+        print(f"Registered callable under name '{variable_name}'")
         State().store[variable_name] = store
-        return user_function
+        return tmp
 
     return inner_decorator
 
