@@ -10,7 +10,7 @@ from dataclasses import dataclass
 ENDIANNESS: Literal["little", "big"] = "little"
 
 
-class bytearray(bytearray):
+class rep_bytearray(bytearray):
     def __str__(self):
         if len(self) < 10:
             return super().__str__()

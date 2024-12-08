@@ -4,7 +4,7 @@ from random import randint
 from datetime import datetime
 from typing import Optional
 from .utils import DTYPES, ENDIANNESS, Frame_Header, Device, add_metadata, put, get
-from .utils import bytearray as rep_bytearray
+from .utils import rep_bytearray
 from serial import EIGHTBITS, PARITY_ODD, STOPBITS_TWO
 import serial_asyncio_fast as serial_asyncio
 from .utils import State
