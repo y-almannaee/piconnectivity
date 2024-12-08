@@ -36,7 +36,7 @@ class rep_bytearray(bytearray):
         elif self[7] == 0:
             data += "ack"
             data += " success" if self[8] == 255 else " failure"
-            data += f" sequence: {int.from_bytes(self[9:10],'little')}"
+            data += f" sequence: {int.from_bytes(self[8:10],'little')}"
             if self[2] > 4:
                 # if the ack is longer than a simple 4 bytes
                 data += f" get response type: {self[11]}"
@@ -300,6 +300,8 @@ def to_bytes(data: any, length=None) -> bytes:
             return data.to_bytes((blen + 7) // 8, byteorder=ENDIANNESS)
         else:
             return data.to_bytes(length, byteorder=ENDIANNESS)
+    if isinstance(data, str):
+        return data.encode()
     raise TypeError("Unsupported type for to_bytes")
 
 

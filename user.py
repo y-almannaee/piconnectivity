@@ -8,6 +8,7 @@ async def get_temperature() -> float:
     print(f"Temperature requested: {temperature:.2f}°C")
     return temperature
 
+
 @library.available_as("HWorld", library.DTYPES.char)
 async def hello_world() -> str:
     return "Hello, world!"
