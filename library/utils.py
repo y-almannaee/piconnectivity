@@ -26,9 +26,9 @@ class rep_bytearray(bytearray):
             data+="put"
             data+=f" name length: {self[8]}"
             data+=f" name: {bytes(self[9:9+self[8]]).decode('ascii')}"
-            data+=f" type: {self[9+self[8]+1]}"
-            dtype = DTYPES.from_protocol_number(self[9+self[8]+1])
-            data+=f" value: {DTYPES.revert(self[9+self[8]+2:-3], dtype)}"
+            data+=f" type: {self[9+self[8]]}"
+            dtype = DTYPES.from_protocol_number(self[9+self[8]])
+            data+=f" value: {DTYPES.revert(self[9+self[8]+1:-3], dtype)}"
         elif self[7] == 7:
             data+="get"
             data+=f" name length: {self[8]}"
