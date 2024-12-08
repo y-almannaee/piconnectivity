@@ -16,36 +16,37 @@ class rep_bytearray(bytearray):
             return super().__str__()
         data = f""
         if self[7] == 1:
-            data+="add "
+            data += "add "
             for i in range(len(self[8:-3])):
-                data+=f" {self[i]}"
+                data += f" {self[i]}"
         elif self[7] == 2:
-            data+="remove "
-            data+=self[8]
+            data += "remove "
+            data += self[8]
         elif self[7] == 6:
-            data+="put"
-            data+=f" name length: {self[8]}"
-            data+=f" name: {bytes(self[9:9+self[8]]).decode('ascii')}"
-            data+=f" type: {self[9+self[8]]}"
-            dtype = DTYPES.from_protocol_number(self[9+self[8]])
-            data+=f" value: {DTYPES.revert(self[9+self[8]+1:-3], dtype)}"
+            data += "put"
+            data += f" name length: {self[8]}"
+            data += f" name: {bytes(self[9:9+self[8]]).decode('ascii')}"
+            data += f" type: {self[9+self[8]]}"
+            dtype = DTYPES.from_protocol_number(self[9 + self[8]])
+            data += f" value: {DTYPES.revert(self[9+self[8]+1:-3], dtype)}"
         elif self[7] == 7:
-            data+="get"
-            data+=f" name length: {self[8]}"
-            data+=f" name: {bytes(self[9:9+self[8]]).decode('ascii')}"
+            data += "get"
+            data += f" name length: {self[8]}"
+            data += f" name: {bytes(self[9:9+self[8]]).decode('ascii')}"
         elif self[7] == 0:
-            data+="ack"
-            data+=" success" if self[8]==255 else " failure"
-            data+=f" sequence: {int.from_bytes(self[9:10],'little')}"
+            data += "ack"
+            data += " success" if self[8] == 255 else " failure"
+            data += f" sequence: {int.from_bytes(self[9:10],'little')}"
             if self[2] > 4:
                 # if the ack is longer than a simple 4 bytes
-                data+=f" get response type: {self[11]}"
+                data += f" get response type: {self[11]}"
                 dtype = DTYPES.from_protocol_number(self[11])
-                data+=f" value: {DTYPES.revert(self[12:-3], dtype)}"
+                data += f" value: {DTYPES.revert(self[12:-3], dtype)}"
 
         return f"""from: {self[0]} to: {self[1]} length: {self[2]} \
 sequence: {int.from_bytes(self[3:5],'little')} ack requested: {bool(self[5])} [start byte] \
 data: {data} checksum: {(self[-3] << 8) + self[-2]} [stop byte]"""
+
 
 @dataclass
 class Frame_Header:
@@ -109,7 +110,7 @@ class DTYPES(Enum):
     long = int64 = ("int64", 8, True, 23)
 
     # Unsigned integers
-    uint8 = ("uint8", 1, False, 25)
+    uint8 = byte = ("uint8", 1, False, 25)
     uint16 = ushort = ("uint16", 2, False, 26)
     uint = uint32 = ("uint32", 4, False, 27)
     ulong = uint64 = ("uint64", 8, False, 28)
