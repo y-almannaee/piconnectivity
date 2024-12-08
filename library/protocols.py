@@ -4,6 +4,7 @@ from random import randint
 from datetime import datetime
 from typing import Optional
 from .utils import DTYPES, ENDIANNESS, Frame_Header, Device, add_metadata, put, get
+from .utils import bytearray as rep_bytearray
 from serial import EIGHTBITS, PARITY_ODD, STOPBITS_TWO
 import serial_asyncio_fast as serial_asyncio
 from .utils import State
@@ -66,7 +67,7 @@ class UART_Handler_Protocol(asyncio.Protocol):
         while True:
             try:
                 item = await State().tasks["uart"].get()
-                print("Processing queue item:", item)
+                print("Processing queue item:", rep_bytearray(item))
                 # Send the item through the transport
                 seq = bytes(item[3:5])
                 if item[0] == State().device_id and seq != b"\x00\x00":
@@ -207,7 +208,7 @@ class UART_Handler_Protocol(asyncio.Protocol):
             self.pending_acks.pop(seq)
         except KeyError as e:
             raise Exception(f"No such ack sequence {seq}") from None
-        print(f"Ack received for {seq}")
+        print(f"Ack received for {int.from_bytes(seq,'little')}")
         if len(payload) > 4:
             # if there are more than 4 bytes
             # (indicating there is a get response)
