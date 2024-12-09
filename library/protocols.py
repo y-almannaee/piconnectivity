@@ -1,7 +1,7 @@
 import asyncio
 import numpy as np
 from random import randint
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 from .utils import DTYPES, ENDIANNESS, Frame_Header, Device, add_metadata, put, get
 from .utils import rep_bytearray
@@ -24,13 +24,14 @@ SERIAL_TIMEOUT: int = 15  # in seconds
 
 
 class UART_Handler_Protocol(asyncio.Protocol):
+    timeout = 15
 
     def __init__(self):
         super().__init__()
         self.buffer = bytearray()
         self.transport = None
         self.header: Optional[Frame_Header] = None
-        self.device_found = False
+        self.device_found = 0
         self.pending_acks = {}
 
     def connection_made(self, transport):
@@ -44,11 +45,46 @@ class UART_Handler_Protocol(asyncio.Protocol):
         asyncio.create_task(self.check_queue())
         # Start the discovery task
         asyncio.create_task(self.issue_discovery())
+        # Start the trash-collector task (ack not received)
+        asyncio.create_task(self.ack_garbageman())
+
+    def disconnect_device(self):
+        new_payload = bytearray()
+        new_payload.extend((2, self.device_found))
+        new_frame = add_metadata(0, new_payload)
+        for protocol in State().tasks:
+            # Distribute the new frame to all protocols
+            State().tasks[protocol].put_nowait(new_frame)
+        State().awaiting_connection[self.device_found].clear()
+        self.device_found = 0
+        self.pending_acks.clear()
+
+    async def ack_garbageman(self):
+        while True:
+            try:
+                if self.device_found == 0:
+                    # No device, just sleep
+                    await asyncio.sleep(5)
+                    continue
+                for seq, item in self.pending_acks.items():
+                    if item[0] + timedelta(seconds=self.timeout) > datetime.now():
+                        # if the item's datetime is older than the timeout
+                        if item[2] == 0:
+                            # First timeout, send the item through the transport again
+                            self.pending_acks[seq] = (datetime.now(), item[1], 1)
+                            self.transport.write(item[1])
+                        else:
+                            # consider the device timed out
+                            self.disconnect_device()
+                await asyncio.sleep(self.timeout / 2)
+            except asyncio.CancelledError:
+                print("UART garbageman told to go home")
+                break
 
     async def issue_discovery(self):
         while True:
             try:
-                if self.device_found:
+                if self.device_found != 0:
                     # If we have a device connected, just sleep
                     await asyncio.sleep(5)
                     continue
@@ -60,22 +96,23 @@ class UART_Handler_Protocol(asyncio.Protocol):
                 State().tasks["uart"].put_nowait(discovery_frame)
                 await asyncio.sleep(randint(3, 8))
             except asyncio.CancelledError:
-                print("Discovery cancelled")
+                print("UART discovery cancelled")
                 break
 
     async def check_queue(self):
         while True:
             try:
                 item = await State().tasks["uart"].get()
-                print("Processing queue item:", rep_bytearray(item))
+                print("Sending queue item:", rep_bytearray(item))
                 # Send the item through the transport
                 seq = bytes(item[3:5])
-                if item[0] == State().device_id and seq != b"\x00\x00":
+                ack_req = item[5]
+                if item[0] == State().device_id and ack_req == 255:
                     # If it's our own item and we want an ack
-                    self.pending_acks[seq] = (datetime.now(), item)
+                    self.pending_acks[seq] = (datetime.now(), item, 0)
                 self.transport.write(item)
             except asyncio.CancelledError:
-                print("Queue processing stopped")
+                print("UART queue processing stopped")
                 break
 
     def data_received(self, data):
@@ -142,8 +179,8 @@ class UART_Handler_Protocol(asyncio.Protocol):
             # Process the validated frame
             try:
                 self._process_frame(frame)
-            # except Exception as e:
-            #     print(f"Error processing frame: {e}")
+            except Exception as e:
+                print(f"Error processing frame: {e}")
             finally:
                 # Remove processed frame from buffer
                 self.buffer = self.buffer[self.header.total_frame_length :]
@@ -185,12 +222,10 @@ class UART_Handler_Protocol(asyncio.Protocol):
             # using the ack framework already
             if command_type != 7 and self.header.ack:
                 self._send_ack()
-        finally:
-            pass
-        # except Exception as e:
-        #     print(f"Error in command handler: {e}")
-        #     if self.header.ack:
-        #         self._send_ack(success=False)
+        except Exception as e:
+            print(f"Error in command handler: {e}")
+            if self.header.ack:
+                self._send_ack(success=False)
 
     def _send_ack(self, success=True):
         if self.header.ack is False:
@@ -241,13 +276,13 @@ class UART_Handler_Protocol(asyncio.Protocol):
                 State().tasks[protocol].put_nowait(new_frame)
         else:
             print(f"Device {device_id} already exists.")
-            State().other_devices[device_id].update(chain)
+            State().other_devices[device_id].update(chain, "uart")
 
         if len(chain) == 0:
             # If this device is adjacent to our node (it means it initiated the addition
             # for itself), we should send all of our registered devices to it
-            if not self.device_found:
-                self.device_found = True
+            if self.device_found == 0:
+                self.device_found = device_id
                 new_payload = bytearray()
                 new_payload.extend((1, State().device_id))
                 new_frame = add_metadata(device_id, new_payload)
@@ -276,9 +311,12 @@ class UART_Handler_Protocol(asyncio.Protocol):
             State().other_devices.pop(device_id)
             print(f"Device {device_id} removed.")
             new_frame = add_metadata(0, payload)
-            for protocol in State().tasks:
-                # Distribute the new frame to all protocols
-                State().tasks[protocol].put_nowait(new_frame)
+            if device_id == self.device_found:
+                self.disconnect_device()
+            else:
+                for protocol in State().tasks:
+                    # Distribute the new frame to all protocols
+                    State().tasks[protocol].put_nowait(new_frame)
         else:
             print(f"Device {device_id} not found.")
 

@@ -141,11 +141,15 @@ def start_network(device_id: int = None) -> "None":
         loop = asyncio.get_event_loop()
         loop.run_until_complete(_main())
     except KeyboardInterrupt:
-        print("Stopping...")
+        print("Ctrl+C, stopping...")
 
 
 def stop_network() -> "None":
-    pass
+    print("User-initiated shutdown, stopping...")
+    State().shutdown.set()
+    for task in asyncio.all_tasks():
+        # try to cancel all tasks
+        task.cancel()
 
 
 async def _main() -> "None":
@@ -160,7 +164,10 @@ async def _main() -> "None":
     await start_UART(serial_pins)
     for task in State().scheduled_tasks:
         asyncio.get_running_loop().create_task(task)
-    await State().shutdown.wait()
+    try:
+        await State().shutdown.wait()
+    except asyncio.CancelledError:
+        pass
     # TODO: Serial when RX is high
 
 

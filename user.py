@@ -11,6 +11,7 @@ async def get_temperature() -> float:
 
 @library.available_as("HWorld", library.DTYPES.char)
 async def hello_world() -> str:
+    library.stop_network()
     return "Hello, world!"
 
 

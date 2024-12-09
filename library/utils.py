@@ -11,6 +11,7 @@ ENDIANNESS: Literal["little", "big"] = "little"
 
 
 class rep_bytearray(bytearray):
+    """stringifies the bytearray of a frame in a pretty form"""    
     def __str__(self):
         if len(self) < 10:
             return super().__str__()
@@ -36,7 +37,7 @@ class rep_bytearray(bytearray):
         elif self[7] == 0:
             data += "ack"
             data += " success" if self[8] == 255 else " failure"
-            data += f" sequence: {int.from_bytes(self[8:10],'little')}"
+            data += f" sequence: {int.from_bytes(self[9:11],'little')}"
             if self[2] > 4:
                 # if the ack is longer than a simple 4 bytes
                 data += f" get response type: {self[11]}"
@@ -159,6 +160,8 @@ class DTYPES(Enum):
 
     @classmethod
     def revert(cls, data, datatype) -> "float | int | str | bool":
+        if isinstance(datatype,int):
+            datatype = cls.from_protocol_number(datatype)
         bo = "<" if ENDIANNESS == "little" else ">"  # byte order
         if datatype in (DTYPES.int8, DTYPES.int16, DTYPES.int32, DTYPES.int64):
             return int.from_bytes(data, byteorder=ENDIANNESS, signed=True)
@@ -179,6 +182,8 @@ class DTYPES(Enum):
 
 
 class Writable_Store:
+    """Stores a writable value. 
+    The store interface should be fixed with a read, write, and type method."""
     value: any = None
     _name: str
     _datatype: DTYPES
@@ -199,6 +204,9 @@ class Writable_Store:
 
 
 class Callable_Store:
+    """Stores a callable value. 
+    The store interface should be fixed with a read, write, and type method.
+    The write method of this store will raise an error."""
     _user_func: callable
     _name: str
     _datatype: DTYPES
@@ -214,6 +222,7 @@ class Callable_Store:
     #         # of this store, just call the command
     #         return self._user_func()
     #     super().__getattribute__(name)
+    # This code really messed up getting attributes :(
 
     async def read(self):
         value = await self._user_func()
@@ -227,6 +236,7 @@ class Callable_Store:
 
 
 class Device:
+    """Represents a device in the network."""
     id: int
     chain: List[List["Device"]]
     iface: str
@@ -238,13 +248,19 @@ class Device:
         if id in State().awaiting_connection:
             State().awaiting_connection[id].set()
 
-    def update(self, new_chain):
+    def update(self, new_chain, iface):
         """Updates the chain and interface if distance is shorter"""
-        pass
+        for i in range(len(self.chain)):
+            # Iterate over all stored chains
+            if len(new_chain) < len(self.chain[i]):
+                self.chain.insert(i, new_chain)  # insert before the longer chain
+                self.iface = iface
+                break
 
     def distance(self):
-        """Finds distance to node"""
-        return len(self.chain)
+        """Find the distance to the node"""
+        # Sorts the chain by its length and returns the shortest length
+        return len(sorted(self.chain, key=lambda ch: len(ch), reverse=True)[0])
 
 
 class State:
@@ -264,6 +280,7 @@ class State:
         "iic": Queue(),
         "spi": Queue(),
     }
+    _sequence = 0
 
     def __new__(cls):
         if cls._instance is None:
@@ -276,6 +293,16 @@ class State:
 
     def running(self) -> None:
         return not self.shutdown.is_set()
+
+    def get_next_sequence(self) -> bytes:
+        """Gets the next number in the sequence. Max 65535, min 1.
+
+        Returns: representation of the sequence (bytes)
+        """        
+        self._sequence += 1
+        if self._sequence > 65535:
+            self._sequence = 1
+        return to_bytes(self._sequence, length=2)
 
     async def start_pi(self) -> None:
         self.pi = asyncpio.pi()
@@ -328,9 +355,9 @@ def add_metadata(
     if not isinstance(message, bytes):
         raise TypeError("Message should be a bytes object")
     msg_len = to_bytes(len(message))
-    # Nonce calculation does not have to be the same across implementations, just needs to ensure that it is reasonably
-    # random. Below code takes the current Unix time down to 2 decimal places, then hashes it down to 1 byte using Blake2b
-    msg_sequence = token_bytes(2) if sequence else to_bytes(0, length=2)
+    # Nonce (or sequence) calculation does not have to be the same across implementations, just needs to ensure that it 
+    # is reasonably random or unique.
+    msg_sequence = State().get_next_sequence() if sequence else to_bytes(0, length=2)
     msg_ack = to_bytes(255) if ack else to_bytes(0)
     msg_start = to_bytes(255)
     frame += (
@@ -353,7 +380,7 @@ def add_metadata(
 
 def put(payload: bytes) -> None:
     """
-    Handle the "put" command.
+    Handle the "put" command. Not a user-facing function.
     Updates a variable with the specified name, datatype, and value.
     """
     if payload[0] != 6:
@@ -386,6 +413,10 @@ def put(payload: bytes) -> None:
 
 
 async def get(payload: bytes) -> tuple[DTYPES, bytes]:
+    """
+    Handle the "get" command. Not a user-facing function.
+    Returns a requested variable with specified name in an ack response.
+    """
     if payload[0] != 7:
         raise Exception("Not a get command.")
 
