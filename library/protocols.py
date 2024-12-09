@@ -50,17 +50,16 @@ class UART_Handler_Protocol(asyncio.Protocol):
         asyncio.create_task(self.ack_garbageman())
 
     async def disconnect_device(self):
-        async with self.ack_lock:
-            new_payload = bytearray()
-            new_payload.extend((2, self.device_found))
-            new_frame = add_metadata(0, new_payload)
-            for protocol in State().tasks:
-                # Distribute the new frame to all protocols
-                State().tasks[protocol].put_nowait(new_frame)
-            State().awaiting_connection[self.device_found].clear()
-            print(f"Device with ID {self.device_found} disconnected")
-            self.device_found = 0
-            self.pending_acks.clear()
+        new_payload = bytearray()
+        new_payload.extend((2, self.device_found))
+        new_frame = add_metadata(0, new_payload)
+        for protocol in State().tasks:
+            # Distribute the new frame to all protocols
+            State().tasks[protocol].put_nowait(new_frame)
+        State().awaiting_connection[self.device_found].clear()
+        print(f"Device with ID {self.device_found} disconnected")
+        self.device_found = 0
+        self.pending_acks.clear()
 
     async def ack_garbageman(self):
         while True:
@@ -82,6 +81,7 @@ class UART_Handler_Protocol(asyncio.Protocol):
                             else:
                                 # consider the device timed out
                                 await self.disconnect_device()
+                                break
                 await asyncio.sleep(self.timeout / 2)
             except asyncio.CancelledError:
                 print("UART garbageman told to go home")
