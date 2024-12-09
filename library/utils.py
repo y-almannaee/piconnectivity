@@ -22,7 +22,7 @@ class rep_bytearray(bytearray):
                 data += f" {self[i]}"
         elif self[7] == 2:
             data += "remove "
-            data += self[8]
+            data += f"{self[8]}"
         elif self[7] == 6:
             data += "put"
             data += f" name length: {self[8]}"
