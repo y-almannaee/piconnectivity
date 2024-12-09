@@ -70,7 +70,8 @@ class UART_Handler_Protocol(asyncio.Protocol):
                     await asyncio.sleep(5)
                     continue
                 async with self.ack_lock:
-                    for seq, item in self.pending_acks.items():
+                    for seq in self.pending_acks:
+                        item = self.pending_acks[seq]
                         if item[0] + timedelta(seconds=self.timeout) < datetime.now():
                             # if the item's datetime is older than the timeout
                             if item[2] == 0:
