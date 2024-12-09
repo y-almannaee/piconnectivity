@@ -58,6 +58,7 @@ class UART_Handler_Protocol(asyncio.Protocol):
             State().tasks[protocol].put_nowait(new_frame)
         State().awaiting_connection[self.device_found].clear()
         print(f"Device with ID {self.device_found} disconnected")
+        State().other_devices.pop(self.device_found)
         self.device_found = 0
         self.pending_acks.clear()
 
@@ -80,6 +81,8 @@ class UART_Handler_Protocol(asyncio.Protocol):
                                 self.transport.write(item[1])
                             else:
                                 # consider the device timed out
+                                if State().futures.get(seq, None) is not None:
+                                    State().futures[seq].set_exception(asyncio.TimeoutError("Device gone"))
                                 await self.disconnect_device()
                                 break
                 await asyncio.sleep(self.timeout / 2)
