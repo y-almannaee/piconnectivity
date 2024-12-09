@@ -58,6 +58,7 @@ class UART_Handler_Protocol(asyncio.Protocol):
                 # Distribute the new frame to all protocols
                 State().tasks[protocol].put_nowait(new_frame)
             State().awaiting_connection[self.device_found].clear()
+            print(f"Device with ID {self.device_found} disconnected")
             self.device_found = 0
             self.pending_acks.clear()
 
@@ -70,10 +71,11 @@ class UART_Handler_Protocol(asyncio.Protocol):
                     continue
                 async with self.ack_lock:
                     for seq, item in self.pending_acks.items():
-                        if item[0] + timedelta(seconds=self.timeout) > datetime.now():
+                        if item[0] + timedelta(seconds=self.timeout) < datetime.now():
                             # if the item's datetime is older than the timeout
                             if item[2] == 0:
                                 # First timeout, send the item through the transport again
+                                print("An item just timed out once")
                                 self.pending_acks[seq] = (datetime.now(), item[1], 1)
                                 self.transport.write(item[1])
                             else:
